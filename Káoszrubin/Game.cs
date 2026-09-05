@@ -2891,7 +2891,8 @@ public sealed class Game : ISessionCommandHandler
                 break;
             case CharacterAction.CloseOrLockDoor:
                 _doorInteractions.TryCloseOrLockAdjacentDoor(_maze, _fogOfWar, doorContext.Origin, _player.Position,
-                    character, doorContext.Target, command.UseKey, command.KeyOwnerCharacterId, keyOwners);
+                    character, allowPartyAssistanceAndPrompts: isLeader, doorContext.Target, command.UseKey,
+                    command.KeyOwnerCharacterId, keyOwners);
                 break;
             case CharacterAction.SearchCurrentPosition:
                 if (!TryDisarmAdjacentTrap(character, position.Value))

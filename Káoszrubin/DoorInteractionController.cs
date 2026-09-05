@@ -128,7 +128,8 @@ internal sealed class DoorInteractionController
     }
 
     public void TryCloseOrLockAdjacentDoor(Maze maze, FogOfWar fogOfWar, Position actorPosition,
-        Position leaderPosition, LiveCharacter selectedCharacter, Position? targetDoorPosition = null,
+        Position leaderPosition, LiveCharacter selectedCharacter, bool allowPartyAssistanceAndPrompts,
+        Position? targetDoorPosition = null,
         bool? useKeyChoice = null, CharacterId? keyOwnerCharacterId = null,
         IReadOnlyList<LiveCharacter>? availableKeyOwners = null)
     {
@@ -141,11 +142,13 @@ internal sealed class DoorInteractionController
             return;
         }
         TryLockAdjacentDoor(maze, fogOfWar, actorPosition, leaderPosition, selectedCharacter,
-            targetDoorPosition, useKeyChoice, keyOwnerCharacterId, availableKeyOwners);
+            allowPartyAssistanceAndPrompts, targetDoorPosition, useKeyChoice, keyOwnerCharacterId,
+            availableKeyOwners);
     }
 
     public void TryLockAdjacentDoor(Maze maze, FogOfWar fogOfWar, Position actorPosition,
-        Position leaderPosition, LiveCharacter selectedCharacter, Position? targetDoorPosition = null,
+        Position leaderPosition, LiveCharacter selectedCharacter, bool allowPartyAssistanceAndPrompts,
+        Position? targetDoorPosition = null,
         bool? useKeyChoice = null, CharacterId? keyOwnerCharacterId = null,
         IReadOnlyList<LiveCharacter>? availableKeyOwners = null)
     {
@@ -154,7 +157,6 @@ internal sealed class DoorInteractionController
         if (door.State == DoorState.Smashed) { _renderer.DrawDoorMessage("A bezúzott ajtó többé nem zárható kulcsra.", ConsoleColor.Red); return; }
         if (door.State == DoorState.Locked) { _renderer.DrawDoorMessage("Az ajtó már kulcsra van zárva."); return; }
 
-        var isThief = CharacterClassRules.IsThief(selectedCharacter.CharacterClass.Id);
         var keyOwners = availableKeyOwners ?? [selectedCharacter];
         var hasAvailableKey = keyOwners.Any(DoorInteractionRules.HasKey);
         var keyOwner = DoorInteractionRules.SelectKeyOwner(selectedCharacter,
@@ -175,32 +177,42 @@ internal sealed class DoorInteractionController
                 ConsoleColor.DarkYellow);
             return;
         }
-        if (isThief)
+        var assistingThief = !allowPartyAssistanceAndPrompts ||
+                             CharacterClassRules.IsThief(selectedCharacter.CharacterClass.Id)
+            ? null
+            : FindNearbyNpcThief(maze, actorPosition);
+        var lockHandler = assistingThief?.Character ?? selectedCharacter;
+        if (CharacterClassRules.IsThief(lockHandler.CharacterClass.Id))
         {
             if (hasAvailableKey && useKeyChoice == false)
             {
-                var attemptCost = ConsumeLockedDoorAttemptNeeds(selectedCharacter);
-                var chance = LockpickChance(selectedCharacter.EffectiveAbilities.Dexterity);
+                var attemptCost = ConsumeLockedDoorAttemptNeeds(lockHandler);
+                var chance = LockpickChance(lockHandler.EffectiveAbilities.Dexterity);
                 var roll = _random.Next(1, 101);
                 var costMessage = $" Próba ára: 🍖 -{attemptCost.Food}, 💧 -{attemptCost.Water}.";
                 if (roll > chance)
                 {
                     _renderer.RefreshCharacterSheet(selectedCharacter);
                     _renderer.DrawDoorMessage(
-                        $"Zárás tolvajpróbája sikertelen: Ügy {selectedCharacter.EffectiveAbilities.Dexterity}, " +
+                        $"{(assistingThief is null ? string.Empty : lockHandler.Name + " előrelép. ")}" +
+                        $"Zárás tolvajpróbája sikertelen: Ügy {lockHandler.EffectiveAbilities.Dexterity}, " +
                         $"esély {chance}%, dobás {roll}. Az ajtó zárva, de nem kulcsra zárva marad.{costMessage}",
                         ConsoleColor.Red);
                     return;
                 }
                 maze.SetDoorState(door, DoorState.Locked);
                 RefreshAfterDoorChanged(maze, fogOfWar, actorPosition, leaderPosition, selectedCharacter,
-                    $"Zárás tolvajpróbája sikerült: Ügy {selectedCharacter.EffectiveAbilities.Dexterity}, " +
+                    $"{(assistingThief is null ? string.Empty : lockHandler.Name + " előrelép. ")}" +
+                    $"Zárás tolvajpróbája sikerült: Ügy {lockHandler.EffectiveAbilities.Dexterity}, " +
                     $"esély {chance}%, dobás {roll}.{costMessage}", ConsoleColor.DarkYellow);
                 return;
             }
             maze.SetDoorState(door, DoorState.Locked);
             RefreshAfterDoorChanged(maze, fogOfWar, actorPosition, leaderPosition, selectedCharacter,
-                "Tolvajként kulcs nélkül is bezártad az ajtó zárját.", ConsoleColor.DarkYellow);
+                assistingThief is null
+                    ? "Tolvajként kulcs nélkül is bezártad az ajtó zárját."
+                    : $"{lockHandler.Name} előrelép, és tolvajként kulcs nélkül bezárja az ajtó zárját.",
+                ConsoleColor.DarkYellow);
             return;
         }
         _renderer.DrawDoorMessage("Az ajtó kulcsra zárásához kulcs vagy tolvaj szükséges.", ConsoleColor.Red);
